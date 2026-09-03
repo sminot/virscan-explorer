@@ -1,0 +1,20 @@
+# Nextflow
+work/
+.nextflow/
+.nextflow.log*
+results/
+
+# Observable app
+app/node_modules/
+app/dist/
+app/src/.observablehq/
+
+# Data staged into the app at build time, never committed
+app/src/data/
+
+node_modules/
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc

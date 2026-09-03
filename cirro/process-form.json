@@ -1,0 +1,55 @@
+{
+  "form": {
+    "type": "object",
+    "name": "VirScan Explorer",
+    "properties": {
+      "metadata_options": {
+        "type": "object",
+        "title": "Sample metadata",
+        "description": "A CSV describing the samples in this cohort. One row per sample. Only samples listed here are included in the analysis.",
+        "properties": {
+          "metadata": {
+            "title": "Sample metadata table",
+            "type": "string",
+            "description": "CSV uploaded to this project as a Files dataset. Must contain one column of VirScan sample IDs.",
+            "pathType": "dataset",
+            "file": "**/*.csv",
+            "useS3Path": true
+          },
+          "sample_id_column": {
+            "title": "Sample ID column",
+            "type": "string",
+            "description": "The column holding the VirScan ID that matches the PhIP-Flow sample names, e.g. VS76_140.",
+            "default": "vs_id"
+          },
+          "participant_column": {
+            "title": "Participant ID column",
+            "type": "string",
+            "description": "Optional. The column identifying the participant. Required for trajectory lines and for distinguishing a time variable from one recorded once per participant."
+          }
+        },
+        "required": ["metadata", "sample_id_column"]
+      },
+      "annotation_options": {
+        "type": "object",
+        "title": "Virus annotations",
+        "properties": {
+          "virus_annotations": {
+            "title": "Virus annotation table",
+            "type": "string",
+            "description": "Optional CSV with an 'organism' column plus any columns grouping organisms into biologically meaningful sets.",
+            "pathType": "dataset",
+            "file": "**/*.csv",
+            "useS3Path": true
+          }
+        }
+      }
+    },
+    "required": ["metadata_options"]
+  },
+  "ui": {
+    "metadata_options": {
+      "ui:order": ["metadata", "sample_id_column", "participant_column"]
+    }
+  }
+}

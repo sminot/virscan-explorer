@@ -1,0 +1,27 @@
+@import url("observablehq:default.css");
+@import url("observablehq:theme-air.css");
+
+/* System fonts only. The site is served inside Cirro's Web Viewer iframe, whose
+   content security policy is not documented; an external font request may be
+   blocked, and a clinical data portal should not be reaching out to a font CDN
+   to render a page. */
+:root {
+  --sans-serif: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --serif: Georgia, "Times New Roman", serif;
+  --monospace: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.note {
+  border-left: 3px solid var(--theme-foreground-faintest);
+  padding: 0.25rem 0 0.25rem 0.75rem;
+  color: var(--theme-foreground-muted);
+  font-size: 0.85rem;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  align-items: flex-end;
+  margin-bottom: 1rem;
+}

@@ -1,0 +1,36 @@
+{
+  "id": "process-hutch-virscan-explorer-1_0",
+  "name": "VirScan Explorer",
+  "desc": "Merges organism-level scores from one or more VirScan (PhIP-Flow) runs with a sample metadata table and publishes an interactive web app for comparing organisms across groups and over time.",
+  "executor": "NEXTFLOW",
+  "category": "Targeted Sequencing",
+  "pipelineTypeOverride": "Community",
+  "documentationUrl": "https://github.com/sminot/virscan-explorer",
+  "parentProcessIds": [
+    "process-hutch-virscan-1_3",
+    "process-hutch-virscan-1_2",
+    "process-hutch-virscan-1_1",
+    "process-hutch-virscan-1_0"
+  ],
+  "childProcessIds": [],
+  "dataType": "VirScan Explorer (interactive site)",
+  "code": {
+    "repository": "GITHUBPRIVATE",
+    "uri": "sminot/virscan-explorer",
+    "script": "main.nf",
+    "version": "main"
+  },
+  "allowMultipleSources": true,
+  "usesSampleSheet": false,
+  "computeDefaults": [
+    {
+      "executor": "NEXTFLOW",
+      "json": "s3://<RESOURCES_BUCKET>/<PROCESS_DIRECTORY>/process-compute.config",
+      "name": "Default"
+    }
+  ],
+  "paramMapJson": "s3://<RESOURCES_BUCKET>/<PROCESS_DIRECTORY>/process-input.json",
+  "formJson": "s3://<RESOURCES_BUCKET>/<PROCESS_DIRECTORY>/process-form.json",
+  "webOptimizationJson": "s3://<RESOURCES_BUCKET>/<PROCESS_DIRECTORY>/process-output.json",
+  "preProcessScript": "s3://<RESOURCES_BUCKET>/<PROCESS_DIRECTORY>/preprocess.py"
+}

@@ -1,0 +1,7 @@
+{
+  "outdir": "$.dataset.dataPath",
+  "metadata": "$.dataset.params.metadata_options.metadata",
+  "sample_id_column": "$.dataset.params.metadata_options.sample_id_column",
+  "participant_column": "$.dataset.params.metadata_options.participant_column",
+  "virus_annotations": "$.dataset.params.annotation_options.virus_annotations"
+}
