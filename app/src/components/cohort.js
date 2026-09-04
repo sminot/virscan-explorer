@@ -43,6 +43,16 @@ export async function loadRanking(score) {
   return loadJSON(`${SHARDS}/rankings/${score}.json`);
 }
 
+/**
+ * A grouping value as a category label.
+ *
+ * Levels are often numbers: 0/1 indicators, visit days. Left numeric, Plot gives them
+ * a continuous colour scale, which draws a gradient between what are categories.
+ */
+export function asLevel(value) {
+  return value == null ? null : String(value);
+}
+
 /** Column-oriented JSON to an array of row objects. */
 export function toRows(columns) {
   const names = Object.keys(columns);

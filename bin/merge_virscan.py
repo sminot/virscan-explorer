@@ -130,6 +130,32 @@ def read_run(dataset_name, organism_summary, sample_annotation):
     }
 
 
+# Statistics taken over an organism's hits. With no hits there is nothing to average,
+# and PhIP-Flow is inconsistent about what it writes: mostly 0.0, but NaN in a minority
+# of rows. Both mean the same thing.
+HIT_STATISTICS = ["max_ebs_hits", "mean_ebs_hits", "gmean_ebs_hits"]
+
+
+def normalise_hit_statistics(scores):
+    """Give zero-hit rows a zero score, and report how many needed it.
+
+    Left as NaN these rows drop out of models and plots, which would quietly shrink
+    the cohort for some organisms and not others. Filling is safe only because the
+    rows are exactly those with no hits; anything else is left alone and surfaced.
+    """
+    filled, unexplained = 0, 0
+    for column in HIT_STATISTICS:
+        if column not in scores.columns or "n_hits_all" not in scores.columns:
+            continue
+        missing = scores[column].isna()
+        no_hits = missing & (scores["n_hits_all"] == 0)
+        scores.loc[no_hits, column] = 0.0
+        filled += int(no_hits.sum())
+        unexplained += int((missing & ~no_hits).sum())
+    return scores, {"zero_hit_scores_filled": filled,
+                    "missing_scores_with_hits": unexplained}
+
+
 def classify_column(series):
     """How the app should offer a metadata column: as a grouping variable, a
     continuous variable, a date axis, or an identifier it should not plot.
@@ -315,6 +341,7 @@ def main():
 
     scores = pd.concat(frames, ignore_index=True)
     qc = pd.concat(qc_frames, ignore_index=True)
+    scores, missing_scores = normalise_hit_statistics(scores)
 
     # A sample that is empirical in two runs is a genuine ambiguity: the same
     # material measured twice. Refuse rather than silently double-count it.
@@ -423,6 +450,7 @@ def main():
         "score_columns": present_scores,
         "sample_id_column": args.sample_id_column,
         "participant_column": args.participant_column,
+        "missing_scores": missing_scores,
     }
 
     columns = describe_columns(samples, reserved, args.participant_column)
@@ -434,6 +462,7 @@ def main():
         "score_columns": present_scores,
         "sample_id_column": args.sample_id_column,
         "participant_column": args.participant_column,
+        "missing_scores": missing_scores,
         "columns": columns,
     }
 

@@ -7,13 +7,16 @@ title: Longitudinal
 ```js
 const meta = await FileAttachment("data/overview.json").json();
 const sampleColumns = await FileAttachment("data/samples.json").json();
+const settings = await FileAttachment("data/models_index.json").json();
 ```
 
 ```js
 import {
   toRows, withMetadata, loadOrganism, groupingColumns, defaultGroupingColumn,
-  timeColumns, defaultTimeColumn, defaultOrganism, column, scoreColumns, scoreLabel
+  timeColumns, defaultTimeColumn, defaultOrganism, column, asLevel,
+  scoreColumns, scoreLabel
 } from "./components/cohort.js";
+import {loadModels, formatP} from "./components/analysis.js";
 ```
 
 ```js
@@ -75,7 +78,7 @@ const trajectory = withMetadata(await loadOrganism(meta, organism), samples, sco
     sample: d.sample,
     participant: participantColumn ? d[participantColumn] : null,
     t: isTemporal ? Date.parse(d[timeBy]) : Number(d[timeBy]),
-    grp: d[groupBy],
+    grp: asLevel(d[groupBy]),
     value: d.value
   }))
   .filter(d => Number.isFinite(d.t) && d.grp != null);
@@ -134,7 +137,7 @@ Plot.plot({
   marginLeft: 60,
   x: {label: timeBy, grid: true, type: isTemporal ? "utc" : "linear"},
   y: {label: scoreLabel(score), grid: true, type: yScale},
-  color: {legend: true, label: groupBy},
+  color: {legend: true, label: groupBy, type: "ordinal"},
   marks: [
     participantColumn && showParticipants
       ? Plot.line(trajectory, {
@@ -163,9 +166,9 @@ Plot.plot({
   marginLeft: 60,
   marginBottom: 70,
   fx: {label: timeBy, tickRotate: distinctTimes.length > 6 ? -30 : 0},
-  x: {label: null, axis: null},
+  x: {label: null, axis: null, type: "band"},
   y: {label: scoreLabel(score), grid: true, type: yScale},
-  color: {legend: true, label: groupBy},
+  color: {legend: true, label: groupBy, type: "ordinal"},
   marks: [
     Plot.boxY(binned, {fx: "bin", x: "grp", y: "value", fill: "grp", fillOpacity: 0.5}),
     Plot.ruleY([0])
@@ -195,10 +198,103 @@ const counts = d3.groups(binned, d => d.bin, d => d.grp)
 Inputs.table(counts, {width: 640, height: 280})
 ```
 
+## Does the trajectory differ between groups?
+
+```js
+const fitted = settings.models;
+const modelRows = fitted?.variables?.includes(groupBy) ? await loadModels(groupBy) : [];
+const thisOrganism = modelRows.find(r => r.organism === organism);
+```
+
+```js
+if (!participantColumn) {
+  display(html`<div class="note">No participant column was supplied, so repeated
+    samples from one person cannot be linked and no model was fitted. Pass
+    <code>--participant_column</code> when running the pipeline.</div>`);
+} else if (!fitted) {
+  display(html`<div class="note">No mixed models were fitted for this analysis.</div>`);
+} else if (!fitted.variables.includes(groupBy)) {
+  display(html`<div class="note">No model was fitted for <code>${groupBy}</code>${groupBy === fitted.time_column ? ", because it is the time axis the models are fitted against" : ""}.</div>`);
+}
+```
+
+```js
+// The model is fitted once, on one score against one time variable. Saying which
+// avoids a reader assuming it follows whatever the controls above are set to.
+if (fitted) {
+  display(html`<div class="note">Fitted as
+    <code>${fitted.formula}</code>, on <strong>${scoreLabel(fitted.score)}</strong>
+    against <strong>${fitted.time_column}</strong>, for organisms detected in at least
+    ${(100 * fitted.min_hit_rate).toFixed(0)}% of samples.
+    ${fitted.score !== score || fitted.time_column !== timeBy
+      ? html`The plots above currently show <strong>${scoreLabel(score)}</strong> against <strong>${timeBy}</strong>, so they do not match what was modelled.`
+      : ""}</div>`);
+}
+```
+
+```js
+if (thisOrganism) {
+  display(Inputs.table([
+    {Term: "Group × time interaction", Estimate: null, p: thisOrganism.p_interaction, FDR: thisOrganism.fdr_interaction},
+    {Term: "Time slope", Estimate: thisOrganism.time_slope, p: thisOrganism.p_time, FDR: null},
+    {Term: "Group effect", Estimate: thisOrganism.group_effect, p: thisOrganism.p_group, FDR: null}
+  ], {
+    header: {p: "p", FDR: "FDR"},
+    format: {
+      Estimate: d => d == null ? "" : d.toFixed(4),
+      p: formatP,
+      FDR: formatP
+    },
+    width: 640
+  }));
+} else if (fitted?.variables?.includes(groupBy)) {
+  display(html`<div class="note">No model converged for ${organism} against
+    <code>${groupBy}</code>. That is usual for an organism few samples respond to.</div>`);
+}
+```
+
+```js
+if (thisOrganism) {
+  display(html`<div class="note">Based on ${thisOrganism.n_samples} samples from
+    ${thisOrganism.n_participants} participants. The interaction term asks whether the
+    groups change at different rates; the group effect asks whether they differ overall.
+    The FDR is corrected across the ${modelRows.length} organisms fitted for
+    <code>${groupBy}</code>.</div>`);
+}
+```
+
+```js
+// Ranked by interaction, so the organisms whose trajectories differ most by group are
+// the ones a reader sees, rather than whichever they happened to select.
+if (modelRows.length) {
+  display(Inputs.table(modelRows.slice(0, 40), {
+    columns: ["organism", "p_interaction", "fdr_interaction", "time_slope", "n_participants"],
+    header: {
+      p_interaction: "p (interaction)",
+      fdr_interaction: "FDR",
+      time_slope: "Time slope",
+      n_participants: "Participants"
+    },
+    format: {
+      p_interaction: formatP,
+      fdr_interaction: formatP,
+      time_slope: d => d == null ? "" : d.toFixed(4)
+    },
+    width: {organism: 320},
+    height: 320
+  }));
+}
+```
+
 <div class="note">
 
-${participantColumn
-  ? html`Repeated measures on the same participant are linked by <code>${participantColumn}</code>. The group means shown here ignore that dependence; a mixed-effects model is the right tool for testing a difference, and is not yet computed by the pipeline.`
-  : html`No participant column was supplied, so repeated samples from one person cannot be linked. Pass <code>--participant_column</code> when running the pipeline to enable trajectory lines.`}
+The model is a linear mixed-effects fit with a random intercept per participant, which
+accounts for repeated samples from one person. It is fitted on log1p of the score,
+because these values are zero-inflated and right-skewed and a linear model on the raw
+scale is dominated by a few high responders.
+
+A group with no significant interaction is not a group with no difference. These
+cohorts are small, most organisms are rarely responded to, and the model tests a
+straight-line trajectory, which a real antibody response need not follow.
 
 </div>

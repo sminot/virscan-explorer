@@ -12,7 +12,7 @@ const sampleColumns = await FileAttachment("data/samples.json").json();
 ```js
 import {
   toRows, withMetadata, loadRanking, loadOrganism,
-  groupingColumns, defaultGroupingColumn, column, scoreColumns, scoreLabel
+  groupingColumns, defaultGroupingColumn, column, asLevel, scoreColumns, scoreLabel
 } from "./components/cohort.js";
 import {distributionRow} from "./components/distribution.js";
 ```
@@ -116,7 +116,7 @@ const organism = picked?.organism ?? shortlist[0]?.organism;
 // One fetch per organism, about 30 KB, then cached.
 const detail = organism
   ? withMetadata(await loadOrganism(meta, organism), samples, score)
-      .map(d => ({...d, group: d[groupBy]}))
+      .map(d => ({...d, group: asLevel(d[groupBy])}))
       .filter(d => d.group != null)
   : [];
 ```
@@ -148,8 +148,8 @@ Plot.plot({
   marginRight: 70,
   height: Math.max(120, 46 * groupLevels.length + 60),
   x: {label: "Samples with at least one hit", grid: true, domain: [0, 1], tickFormat: "%"},
-  y: {label: null, domain: groupLevels},
-  color: {legend: false},
+  y: {label: null, domain: groupLevels, type: "band"},
+  color: {legend: false, type: "ordinal", domain: groupLevels},
   marks: [
     Plot.barX(prevalence, {
       x: "fraction", y: "group", fill: "group", fillOpacity: 0.75,
@@ -192,7 +192,7 @@ responders.length
         ticks: groupLevels.map((_, i) => i),
         tickFormat: i => groupLevels[i]
       },
-      color: {legend: false, domain: groupLevels},
+      color: {legend: false, type: "ordinal", domain: groupLevels},
       marks: [
         // The violin shows where the responders actually sit.
         Plot.areaY(rows.flatMap(r => r.violin), {

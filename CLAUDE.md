@@ -18,8 +18,10 @@ Layout:
 ```
 main.nf                     entrypoint; validates inputs, builds the run list
 modules/merge.nf            MERGE_INPUTS: runs bin/merge_virscan.py
+modules/analyse.nf          ANALYSE: mixed models and UMAP; slow, heavy dependencies
 modules/site.nf             BUILD_SITE: npm ci, observable build, strip remote assets
 bin/merge_virscan.py        the merge; PEP 723 inline deps, run by uv via its shebang
+bin/model_and_embed.py      the mixed models and the UMAP embedding
 bin/strip_remote_assets.mjs removes remote <link> tags from the built pages
 app/                        the Observable Framework project
 app/src/about.md            the explainer page; keep it true to what the app does
@@ -58,6 +60,19 @@ Each of these was found by hitting it. Do not undo one without re-testing.
   is by symlink, so writing into `app_source` would modify the working tree, and a
   developer's `app/node_modules` and `app/dist` must not leak into the task.
 
+## The fitted analyses
+
+- **Models are fitted for one score against one time variable**, not every combination:
+  that would be tens of thousands of fits. The Longitudinal page names the settings used
+  and warns when its own controls are showing something else.
+- **The time axis cannot also be the grouping variable.** The interaction is then time
+  against itself, the design is collinear, and most fits fail. `model_and_embed.py`
+  skips that combination.
+- **Non-convergence is an ordinary outcome**, not an error. Sparse organisms often fail
+  to fit; they are omitted from the results table rather than aborting the run.
+- Statsmodels must run in the script's own uv environment. Installing it alongside an
+  ambient venv picked up an incompatible scipy and failed at import.
+
 ## Facts about the input data
 
 Learned from the real Boeckh Lab datasets; these drive the merge logic.
@@ -70,6 +85,15 @@ Learned from the real Boeckh Lab datasets; these drive the merge logic.
 - Replicates collapse: `VS76_140_rep1` and `VS76_140_rep2` are both sample `VS76_140`.
   The QC table keeps the best-covered replicate.
 - `NA` appears as a literal string for missing values.
+- **PhIP-Flow is inconsistent about zero-hit rows.** `max_ebs_hits`, `mean_ebs_hits` and
+  `gmean_ebs_hits` are statistics over an organism's hits, undefined when there are
+  none. It writes `0.0` for most such rows and `NaN` for a minority: 5,316 of 237,448 in
+  the test cohort, every one of them with `n_hits_all == 0`. `normalise_hit_statistics`
+  fills those with zero and reports the count, because left as NaN they drop out of
+  models and plots and quietly shrink the cohort for some organisms and not others.
+- **Grouping levels are often numbers** (0/1 indicators, visit days). Coerce them with
+  `asLevel` and declare `type: "ordinal"`, or Plot draws a continuous colour ramp
+  between what are categories.
 - Datasets are named `<run>_<library>_<version>_Z<threshold>`. Different libraries
   (`Vir3` vs `CoV`) or thresholds (`Z7` vs `Z3.5`) are not comparable and must not be
   merged. `cirro/preprocess.py` enforces this.

@@ -12,6 +12,7 @@ process BUILD_SITE {
 
     input:
     path merged
+    path analysis
     // The app is staged as a task input rather than read from projectDir, because
     // only staged paths are visible inside the container.
     path app_source, stageAs: 'app_source'
@@ -44,6 +45,7 @@ process BUILD_SITE {
     cp ${merged}/site/overview.json \\
        ${merged}/site/samples.json \\
        ${merged}/merge_report.json \\
+       ${analysis}/models_index.json \\
        app/src/data/
 
     cd app
@@ -59,8 +61,10 @@ process BUILD_SITE {
     # they are copied in beside the pages rather than bundled. Observable Framework
     # only includes files a page names literally, and which of these is wanted is not
     # known until someone picks an organism.
-    mkdir -p dist/shards
+    mkdir -p dist/shards dist/analysis
     cp -R ${merged}/site/organisms ${merged}/site/rankings dist/shards/
+    cp ${analysis}/embedding.json dist/analysis/ 2>/dev/null || true
+    if [ -d ${analysis}/models ]; then cp -R ${analysis}/models dist/analysis/; fi
 
     # The site must not depend on any remote origin: Cirro serves it inside an iframe
     # whose content security policy is not documented.

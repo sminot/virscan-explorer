@@ -21,6 +21,7 @@ export default {
   pages: [
     { name: "Organisms", path: "/organisms" },
     { name: "Longitudinal", path: "/longitudinal" },
+    { name: "Similarity", path: "/similarity" },
     { name: "Cohort", path: "/cohort" },
     { name: "About", path: "/about" },
   ],

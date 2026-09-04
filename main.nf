@@ -3,6 +3,7 @@
 nextflow.enable.dsl = 2
 
 include { MERGE_INPUTS } from './modules/merge.nf'
+include { ANALYSE      } from './modules/analyse.nf'
 include { BUILD_SITE   } from './modules/site.nf'
 
 def helpMessage() {
@@ -28,6 +29,11 @@ def helpMessage() {
       --participant_column  Metadata column identifying the participant. Required for
                             trajectory lines and repeated-measures views.
       --virus_annotations   CSV with an 'organism' column plus grouping columns.
+      --model_score         Score the mixed models are fitted on (default: gmean_ebs_hits)
+      --model_time_column   Time variable the models are fitted against. Defaults to the
+                            first numeric variable that changes within a participant.
+      --model_min_hit_rate  Skip organisms detected in fewer than this fraction of
+                            samples (default: 0.1)
 
     Example:
       nextflow run main.nf \\
@@ -119,5 +125,6 @@ workflow {
     app = file("${projectDir}/app", checkIfExists: true)
 
     MERGE_INPUTS(inputs, metadata, annotations)
-    BUILD_SITE(MERGE_INPUTS.out.data, app)
+    ANALYSE(MERGE_INPUTS.out.data)
+    BUILD_SITE(MERGE_INPUTS.out.data, ANALYSE.out.data, app)
 }

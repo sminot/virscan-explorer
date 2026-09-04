@@ -20,6 +20,8 @@ Takes existing PhIP-Flow outputs and a metadata CSV, and produces four pages:
   calendar date, coloured by any grouping variable.
 - **Cohort** — every metadata variable with its type and completeness, sequencing
   quality, the full sample table, and the merge report.
+- **Similarity** — a UMAP of the samples, coloured by any metadata variable, for
+  spotting structure and for checking whether it is clinical or batch.
 - **About** — what the analysis does and what each view is for, written for readers who
   did not run the pipeline, with the provenance of this particular build.
 
@@ -77,6 +79,9 @@ nextflow run main.nf -profile docker \
 | `--sample_id_column` | `vs_id` | Metadata column holding the VirScan sample ID |
 | `--participant_column` | none | Metadata column identifying the participant |
 | `--virus_annotations` | none | CSV grouping organisms |
+| `--model_score` | `gmean_ebs_hits` | Score the mixed models are fitted on |
+| `--model_time_column` | first that varies within a participant | Time variable the models are fitted against |
+| `--model_min_hit_rate` | `0.1` | Skip organisms detected in fewer samples than this |
 
 Profiles: `docker`, `singularity`, and `local` for running against locally installed
 `uv` and `node` without a container runtime.
@@ -88,10 +93,12 @@ Python dependencies at run time from the inline script metadata in
 ## Outputs
 
 ```
-index.html, organisms.html, longitudinal.html, cohort.html, about.html
+index.html, organisms.html, longitudinal.html, similarity.html, cohort.html, about.html
 _observablehq/, _npm/, _file/, _import/              the site's own assets
 shards/organisms/<n>.json                            one organism's per-sample values
 shards/rankings/<score>.json                         one score's rankings, per grouping variable
+analysis/embedding.json                              UMAP coordinates, one layout per score
+analysis/models/<variable>.json                      mixed model per organism, per grouping variable
 tables/organism_scores.parquet                       merged scores, one row per sample x organism
 tables/samples.parquet                               metadata joined to sequencing QC
 tables/organisms.parquet                             organism list plus any annotations
@@ -199,6 +206,34 @@ wanted is not known until someone picks it.
 
 There is no query engine in the browser and no Parquet reader. The Parquet tables under
 `tables/` are for download and reuse, not for the site.
+
+## The two fitted analyses
+
+Both were asked for in the August 2026 working meeting, and both are computed by the
+pipeline rather than the browser.
+
+**Mixed-effects models.** For each organism, `log1p(score) ~ time * group` with a random
+intercept per participant, which is what accounts for repeated samples from one person.
+The reported test is a joint Wald test across the group-by-time interaction terms, so a
+variable with three arms gives one question — do the trajectories differ at all — rather
+than a set of pairwise comparisons. FDR is corrected across the organisms fitted for
+each grouping variable.
+
+Fitted on one score against one time variable, named by `--model_score` and
+`--model_time_column`. Fitting every combination would be tens of thousands of models
+for a page nobody reads that way, so the Longitudinal page states which settings the
+model used and says so plainly when the plots above it are showing something else.
+
+Organisms below `--model_min_hit_rate` are skipped: a model of a response almost nobody
+has is not informative. Fits that do not converge are reported as such rather than
+dropped silently, which happens often on sparse organisms.
+
+**UMAP.** One layout per score metric, on `log1p` of the samples-by-organisms matrix
+with correlation distance. Per metric rather than one overall, because how many peptides
+were bound is a different view of a cohort than how strongly they were bound.
+
+The neighbourhood size is capped at a third of the cohort, since the default of 15 is
+meaningless for a handful of samples and UMAP errors rather than adjusting itself.
 
 ## Constraints worth knowing
 
