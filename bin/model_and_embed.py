@@ -185,6 +185,18 @@ def fit_models(scores, samples, metric, time_column, participant_column,
             continue
         usable = usable.assign(grp=usable[variable].astype(str))
 
+        # A grouping variable that is a relabelling of the time axis is unidentifiable:
+        # if every level occurs at a single time point there is no within-group slope to
+        # compare, and the interaction has nothing to estimate. Left in, such a fit
+        # converges or not depending on numerical noise, so the same data can produce
+        # different results on different machines. A visit label against visit day is
+        # the usual case.
+        times_per_level = usable.groupby("grp")["t"].nunique()
+        if (times_per_level <= 1).all():
+            print(f"  {variable}: skipped, each level occurs at a single "
+                  f"{time_column} value, so the interaction is unidentifiable")
+            continue
+
         rows = []
         for organism, frame in usable.groupby("organism"):
             outcome = fit_organism(frame)

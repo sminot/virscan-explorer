@@ -224,6 +224,10 @@ Fitted on one score against one time variable, named by `--model_score` and
 for a page nobody reads that way, so the Longitudinal page states which settings the
 model used and says so plainly when the plots above it are showing something else.
 
+A grouping variable that is a relabelling of the time axis is skipped, since each of its
+levels then sits at one time point and the interaction has nothing to estimate. A visit
+label against visit day is the usual case.
+
 Organisms below `--model_min_hit_rate` are skipped: a model of a response almost nobody
 has is not informative. Fits that do not converge are reported as such rather than
 dropped silently, which happens often on sparse organisms.

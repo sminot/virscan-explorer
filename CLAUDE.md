@@ -65,9 +65,11 @@ Each of these was found by hitting it. Do not undo one without re-testing.
 - **Models are fitted for one score against one time variable**, not every combination:
   that would be tens of thousands of fits. The Longitudinal page names the settings used
   and warns when its own controls are showing something else.
-- **The time axis cannot also be the grouping variable.** The interaction is then time
-  against itself, the design is collinear, and most fits fail. `model_and_embed.py`
-  skips that combination.
+- **The time axis cannot also be the grouping variable**, and neither can a relabelling
+  of it. A visit label whose every level sits at one visit day gives the interaction
+  nothing to estimate; left in, it converges or not on numerical noise, so the same data
+  produced 11 model files locally and 10 on the platform. `model_and_embed.py` skips a
+  variable whose levels each occur at a single time value, and says why.
 - **Non-convergence is an ordinary outcome**, not an error. Sparse organisms often fail
   to fit; they are omitted from the results table rather than aborting the run.
 - Statsmodels must run in the script's own uv environment. Installing it alongside an

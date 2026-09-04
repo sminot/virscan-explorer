@@ -51,7 +51,13 @@ not re-analyse sequencing data.
     <p>Plots each participant's trajectory against time from an index event, such as
     transplant or first infection, rather than calendar date. The view overlays group
     averages on the individual lines, and a table below the plots gives samples and
-    participants per time bin per group.</p>
+    participants per time bin per group. A mixed-effects model per organism reports
+    whether the groups change at different rates.</p>
+  </div>
+  <div class="view"><h3>Similarity</h3>
+    <p>Places each sample so that samples with similar responses across all organisms
+    sit near one another, coloured by any metadata variable. Colouring by sequencing run
+    shows whether structure in the cohort is clinical or technical.</p>
   </div>
   <div class="view"><h3>Cohort</h3>
     <p>Shows how complete each metadata variable is and the sequencing quality of each
@@ -69,13 +75,23 @@ not re-analyse sequencing data.
   fifteen for F.
 - Most samples score zero against most organisms. Prevalence and magnitude are shown as
   separate plots; averaging them together hides both.
-- Across all organisms in the library, some will separate any two groups by chance. A
-  high rank identifies a candidate for a formal group comparison that accounts for
-  repeated measures.
-- Repeated samples from one person are not independent, and the group averages shown do
-  not account for that. Mixed-effects models are not implemented.
+- Across all organisms in the library, some will separate any two groups by chance. The
+  ranking on the Organisms page is uncorrected and identifies candidates rather than
+  results; the mixed models correct for multiple testing within each grouping variable.
+- The group averages drawn on the plots ignore that repeated samples from one person are
+  not independent. The mixed models do not: each fits a random intercept per participant.
+  They are fitted on one score against one time variable, both named on the page, and
+  assume a straight-line trajectory, which an antibody response need not follow.
+- A model that does not converge is reported as such rather than dropped. This is common
+  for organisms few samples respond to, and is not evidence of anything.
+- The Similarity view is a projection. It preserves which samples are neighbours far
+  better than how far apart groups are, so distance between clusters is not
+  interpretable and separation there is not a test.
 - This is organism-level only. The tool does not show where within a protein antibodies
-  bind, because the peptide annotations available here carry no protein coordinates.
+  bind, because the peptide library registered for these runs lists only the organism
+  and the peptide sequence. PhIP-Flow passes through whatever columns a library carries,
+  so a library holding protein names and residue positions would make epitope-level
+  analysis possible without changing this tool.
 
 </div>
 
@@ -84,15 +100,28 @@ not re-analyse sequencing data.
 ```js
 const meta = await FileAttachment("data/overview.json").json();
 const report = await FileAttachment("data/merge_report.json").json();
+const settings = await FileAttachment("data/models_index.json").json();
 ```
 
 ```js
+// Read from the analysis rather than written in prose, so this page cannot claim
+// something the pipeline did not do.
 const provenance = [
   {Item: "Samples analysed", Value: meta.n_samples.toLocaleString()},
   {Item: "Organisms", Value: meta.n_organisms.toLocaleString()},
   {Item: "PhIP-Flow runs merged", Value: meta.runs.join(", ")},
   {Item: "Participant column", Value: meta.participant_column ?? "none supplied"},
-  {Item: "Sample ID column", Value: meta.sample_id_column ?? "vs_id"}
+  {Item: "Sample ID column", Value: meta.sample_id_column ?? "vs_id"},
+  {Item: "Mixed models",
+   Value: settings.models
+     ? `${settings.models.formula}, on ${settings.models.score} against ${settings.models.time_column}`
+     : "not fitted"},
+  {Item: "Modelled variables",
+   Value: settings.models ? settings.models.variables.join(", ") : "none"},
+  {Item: "Embedding",
+   Value: settings.embedding
+     ? `UMAP on ${settings.embedding.transform}, ${settings.embedding.metric} distance, ${settings.embedding.metrics.length} score metrics`
+     : "not computed"}
 ];
 ```
 
