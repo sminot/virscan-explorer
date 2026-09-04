@@ -432,6 +432,7 @@ def main():
         "n_runs": len(run_reports),
         "runs": [r["dataset_name"] for r in run_reports],
         "score_columns": present_scores,
+        "sample_id_column": args.sample_id_column,
         "participant_column": args.participant_column,
         "columns": columns,
     }

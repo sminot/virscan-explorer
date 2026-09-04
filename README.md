@@ -20,6 +20,8 @@ Takes existing PhIP-Flow outputs and a metadata CSV, and produces four pages:
   calendar date, coloured by any grouping variable.
 - **Cohort** — every metadata variable with its type and completeness, sequencing
   quality, the full sample table, and the merge report.
+- **About** — what the analysis does and what each view is for, written for readers who
+  did not run the pipeline, with the provenance of this particular build.
 
 Scope is deliberately organism-level. Epitope-level analysis, which needs protein
 coordinates that the Cirro PhIP-Flow outputs do not carry, is not attempted.
@@ -86,7 +88,7 @@ Python dependencies at run time from the inline script metadata in
 ## Outputs
 
 ```
-index.html, organisms.html, longitudinal.html, cohort.html
+index.html, organisms.html, longitudinal.html, cohort.html, about.html
 _observablehq/, _npm/, _file/, _import/              the site's own assets
 shards/organisms/<n>.json                            one organism's per-sample values
 shards/rankings/<score>.json                         one score's rankings, per grouping variable

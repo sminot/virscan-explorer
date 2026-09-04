@@ -22,6 +22,8 @@ modules/site.nf             BUILD_SITE: npm ci, observable build, strip remote a
 bin/merge_virscan.py        the merge; PEP 723 inline deps, run by uv via its shebang
 bin/strip_remote_assets.mjs removes remote <link> tags from the built pages
 app/                        the Observable Framework project
+app/src/about.md            the explainer page; keep it true to what the app does
+app/src/components/distribution.js  violin and letter-value geometry
 cirro/                      Cirro process configuration and its offline tests
 test/inspect_site.mjs       Playwright check that every page actually renders
 ```
@@ -102,6 +104,14 @@ running the workflow against real PhIP-Flow outputs.
   not known until someone picks one. `modules/site.nf` copies `shards/` into `dist/`
   after the build. A test in `test/inspect_site.mjs` would not catch a missing shard, so
   check the organisms page renders a distribution after any change to that copy step.
+- **An empty `html``` template evaluates to null**, and Framework prints that as a
+  literal "null" on the page. A conditional block that may render nothing uses
+  `if (...) { display(...) }` rather than a ternary with an empty template.
+- The distribution of responders is a violin with nested letter-value boxes, computed in
+  `app/src/components/distribution.js` because Plot has no mark for either. A strip of
+  dots was tried first and made the shape unreadable: overlapping points hide where the
+  mass sits. Both plots offer a square-root scale, because binding scores are strongly
+  right-skewed and a few extreme responders otherwise compress everyone else.
 - Charts use Observable Plot. Mosaic/vgplot was deliberately not adopted: fewer
   dependencies, and a more stable API surface.
 - Shared query builders and column-selection rules live in `app/src/components/cohort.js`.

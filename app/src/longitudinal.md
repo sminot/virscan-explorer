@@ -113,9 +113,9 @@ const binned = binnedByValue
 
 ```js
 const shown = new Set(trajectory.map(d => d.sample)).size;
-shown < meta.n_samples
-  ? html`<div class="note">Showing <strong>${shown}</strong> of ${meta.n_samples} samples. The rest have no value for <code>${groupBy}</code> or <code>${timeBy}</code>.</div>`
-  : html``
+if (shown < meta.n_samples) {
+  display(html`<div class="note">Showing <strong>${shown}</strong> of ${meta.n_samples} samples. The rest have no value for <code>${groupBy}</code> or <code>${timeBy}</code>.</div>`);
+}
 ```
 
 ```js

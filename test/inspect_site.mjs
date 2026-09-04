@@ -12,7 +12,7 @@ import { mkdirSync } from "node:fs";
 
 const BASE = process.argv[2] ?? "http://127.0.0.1:8137";
 const SHOTS = process.argv[3] ?? null;
-const PAGES = ["index", "organisms", "longitudinal", "cohort"];
+const PAGES = ["index", "organisms", "longitudinal", "cohort", "about"];
 
 // Observable renders plots as inline SVG; DuckDB needs a moment after load.
 const RENDER_TIMEOUT_MS = 30000;

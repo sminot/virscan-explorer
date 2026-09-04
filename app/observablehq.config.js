@@ -22,6 +22,7 @@ export default {
     { name: "Organisms", path: "/organisms" },
     { name: "Longitudinal", path: "/longitudinal" },
     { name: "Cohort", path: "/cohort" },
+    { name: "About", path: "/about" },
   ],
   footer: "Built by VirScan Explorer from PhIP-Flow outputs.",
 };

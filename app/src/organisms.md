@@ -14,6 +14,7 @@ import {
   toRows, withMetadata, loadRanking, loadOrganism,
   groupingColumns, defaultGroupingColumn, column, scoreColumns, scoreLabel
 } from "./components/cohort.js";
+import {distributionRow} from "./components/distribution.js";
 ```
 
 ```js
@@ -31,9 +32,9 @@ const groupBy = view(Inputs.select(groups.map(g => g.name), {
 // A grouping variable that is missing for some samples silently shrinks the cohort.
 // Say so rather than letting the reader assume every sample is included.
 const groupInfo = column(meta, groupBy);
-groupInfo?.n_missing
-  ? html`<div class="note"><strong>${groupInfo.n_missing}</strong> of ${meta.n_samples} samples have no value for <code>${groupBy}</code> and are excluded from this page.</div>`
-  : html``
+if (groupInfo?.n_missing) {
+  display(html`<div class="note"><strong>${groupInfo.n_missing}</strong> of ${meta.n_samples} samples have no value for <code>${groupBy}</code> and are excluded from this page.</div>`);
+}
 ```
 
 Pick a score and a variable to compare by. The table ranks organisms by how far apart
@@ -80,7 +81,7 @@ const shortlist = ranked
 
 ```js
 html`<div class="note">Showing <strong>${shortlist.length}</strong> of ${ranked.length}
-organisms${minHitPercent > 0 ? html` detected in at least ${minHitPercent}% of samples` : html``}${needle ? html` matching “${organismSearch.trim()}”` : html``}.</div>`
+organisms${minHitPercent > 0 ? ` detected in at least ${minHitPercent}% of samples` : ""}${needle ? ` matching “${organismSearch.trim()}”` : ""}.</div>`
 ```
 
 ```js
@@ -166,27 +167,81 @@ Plot.plot({
 ### How strongly the responders respond
 
 ```js
+// A few responders an order of magnitude above the rest squeeze everyone else against
+// the axis. Square root keeps zero and spreads the body out.
+const xScale = view(Inputs.select(["linear", "sqrt"], {label: "X scale", value: "sqrt"}));
+```
+
+```js
+// One row per group, on a numeric y axis so the violin and the nested boxes share a
+// single scale. A band scale cannot place marks at offsets within a band.
+const rows = groupLevels.map((group, row) =>
+  distributionRow(group, responders.filter(d => d.group === group).map(d => d.value), row));
+```
+
+```js
 responders.length
   ? Plot.plot({
       marginLeft: 120,
-      height: Math.max(160, 90 * groupLevels.length),
-      x: {label: scoreLabel(score), grid: true},
-      fy: {label: null, domain: groupLevels},
-      color: {legend: false},
+      marginBottom: 40,
+      height: Math.max(180, 110 * groupLevels.length),
+      x: {label: scoreLabel(score), grid: true, type: xScale},
+      y: {
+        label: null,
+        domain: [groupLevels.length - 0.5, -0.5],
+        ticks: groupLevels.map((_, i) => i),
+        tickFormat: i => groupLevels[i]
+      },
+      color: {legend: false, domain: groupLevels},
       marks: [
-        Plot.dot(responders, Plot.dodgeY({
-          x: "value", fy: "group", fill: "group", r: 3, fillOpacity: 0.7,
-          channels: {sample: "sample"}, tip: true
-        })),
+        // The violin shows where the responders actually sit.
+        Plot.areaY(rows.flatMap(r => r.violin), {
+          x: "x", y1: "y1", y2: "y2", fill: "group",
+          fillOpacity: 0.28, curve: "basis"
+        }),
+        // Nested letter values: quartiles, then eighths, sixteenths outward. Each
+        // step is thinner, so depth reads as depth rather than as separate boxes.
+        Plot.rect(rows.flatMap(r => r.boxes), {
+          x1: "lower", x2: "upper", y1: "y1", y2: "y2",
+          fill: "group", fillOpacity: 0.55, stroke: "group", strokeOpacity: 0.5,
+          channels: {covers: d => `${(100 * d.coverage).toFixed(1)}% of ${d.n}`},
+          tip: true
+        }),
+        Plot.ruleX(rows.flatMap(r => r.median), {
+          x: "median", y1: d => d.row - 0.22, y2: d => d.row + 0.22,
+          stroke: "currentColor", strokeWidth: 2
+        }),
+        // Beyond the outermost box, drawn individually because at that point each
+        // point is one participant rather than a summary.
+        Plot.dot(rows.flatMap(r => r.outliers), {
+          x: "value", y: "row", fill: "group", r: 2.5, fillOpacity: 0.8
+        }),
+        // A density estimate from two or three points would be a fiction, so those
+        // groups show their raw values instead.
+        Plot.dot(rows.filter(r => r.sparse).flatMap(r => r.points), {
+          x: "value", y: "row", fill: "group", r: 3, fillOpacity: 0.8
+        }),
         Plot.ruleX([0], {strokeOpacity: 0.3})
       ]
     })
   : html`<div class="note">No sample in the cohort has a hit against this organism.</div>`
 ```
 
-Samples scoring zero are left out of this second plot, so it shows the magnitude of a
-response given that there was one. Read it together with the prevalence above: a group
-can look stronger here simply because fewer of its members responded at all.
+```js
+const sparse = rows.filter(r => r.sparse && r.n > 0);
+if (sparse.length) {
+  display(html`<div class="note">${sparse.map(r => `${r.group} (${r.n})`).join(", ")}: too few responders to estimate a distribution, so the individual values are shown.</div>`);
+}
+```
+
+The shaded outline is the distribution of responders. Inside it, the widest box spans
+the middle half of the group, and each narrower box adds the next eighth, sixteenth and
+so on outward, so a long tail stays visible instead of collapsing into a whisker. The
+vertical line is the median. Points past the outermost box are individual samples.
+
+Samples scoring zero are left out of this plot, so it shows the magnitude of a response
+given that there was one. Read it together with the prevalence above: a group can look
+stronger here simply because fewer of its members responded at all.
 
 ```js
 const summary = groupLevels.map(group => {
