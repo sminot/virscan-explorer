@@ -5,17 +5,13 @@ title: VirScan Explorer
 # VirScan Explorer
 
 ```js
-const meta = await FileAttachment("data/cohort.json").json();
+// The whole page comes from one precomputed file. No score matrix, no query engine.
+const meta = await FileAttachment("data/overview.json").json();
 const report = await FileAttachment("data/merge_report.json").json();
-const db = await DuckDBClient.of({
-  scores: FileAttachment("data/organism_scores.parquet"),
-  samples: FileAttachment("data/samples.parquet"),
-  organisms: FileAttachment("data/organisms.parquet")
-});
 ```
 
 ```js
-import {rows, scoreColumns, scoreLabel, sqlIdent} from "./components/cohort.js";
+import {scoreColumns, scoreLabel} from "./components/cohort.js";
 ```
 
 <div class="grid grid-cols-4">
@@ -39,7 +35,7 @@ import {rows, scoreColumns, scoreLabel, sqlIdent} from "./components/cohort.js";
 
 This site was built from ${meta.n_runs} PhIP-Flow ${meta.n_runs === 1 ? "run" : "runs"}
 (${meta.runs.join(", ")}) merged with a sample metadata table. Beads-only controls were
-dropped before merging. Every query below runs in your browser.
+dropped before merging.
 
 ## Most commonly recognized organisms
 
@@ -50,14 +46,15 @@ const topScore = view(Inputs.select(scoreColumns(meta), {
 ```
 
 ```js
-const topOrganisms = rows(await db.query(`
-  SELECT organism,
-         avg(${sqlIdent(topScore)}) AS mean_value,
-         median(${sqlIdent(topScore)}) AS median_value,
-         sum(CASE WHEN n_hits_all > 0 THEN 1 ELSE 0 END)::DOUBLE / count(*) AS fraction_with_hit
-  FROM scores GROUP BY organism
-  ORDER BY mean_value DESC LIMIT 30
-`));
+const topOrganisms = meta.organisms
+  .map((organism, i) => ({
+    organism,
+    mean_value: meta.means[topScore][i],
+    fraction_with_hit: meta.hit_rate[i]
+  }))
+  .filter(d => d.mean_value != null)
+  .sort((a, b) => b.mean_value - a.mean_value)
+  .slice(0, 30);
 ```
 
 ```js
@@ -113,5 +110,5 @@ ${excluded > 0 ? html`<div class="note"><strong>${excluded}</strong> measured sa
 ${unmatched > 0 ? html`<div class="note"><strong>${unmatched}</strong> metadata rows had no measurements in these runs.</div>` : ""}
 
 The metadata table used for this analysis is preserved alongside the results as
-`metadata_snapshot.csv`, so the inputs to this build stay recoverable even if the
-source table is later corrected.
+`tables/metadata_snapshot.csv`, so the inputs to this build stay recoverable even if
+the source table is later corrected. The merged tables are in `tables/` as Parquet.

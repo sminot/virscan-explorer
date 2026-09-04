@@ -91,8 +91,19 @@ running the workflow against real PhIP-Flow outputs.
 
 ## Conventions
 
-- The app uses Framework's built-in `DuckDBClient` and Observable Plot. Mosaic/vgplot
-  was deliberately not adopted: fewer dependencies, and a more stable API surface.
+- **The browser gets no query engine and no Parquet reader.** Every aggregate the pages
+  draw is precomputed by `write_site_data` in `bin/merge_virscan.py`. Querying the
+  237k-row matrix in the browser with DuckDB-WASM meant downloading roughly 45 MB, most
+  of it the engine, to render a thirty-row bar chart. Pages now load 0.7 to 1.1 MB.
+  Do not reintroduce a client-side database to add a view; add the aggregate to the
+  precompute instead.
+- **Sharded files are fetched by relative URL, not bundled.** Observable Framework
+  includes only files a page names literally, and which organism or score is wanted is
+  not known until someone picks one. `modules/site.nf` copies `shards/` into `dist/`
+  after the build. A test in `test/inspect_site.mjs` would not catch a missing shard, so
+  check the organisms page renders a distribution after any change to that copy step.
+- Charts use Observable Plot. Mosaic/vgplot was deliberately not adopted: fewer
+  dependencies, and a more stable API surface.
 - Shared query builders and column-selection rules live in `app/src/components/cohort.js`.
   Defaults that depend on the data (which organism, which time axis) belong there, not
   inlined in a page.

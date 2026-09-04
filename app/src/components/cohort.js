@@ -1,11 +1,71 @@
 // Shared helpers for the VirScan Explorer pages.
 //
-// The pipeline writes organism_scores.parquet, samples.parquet, organisms.parquet
-// and cohort.json into src/data/. Pages open them through Framework's DuckDBClient,
-// which runs every query in the browser, so the published site needs no backend.
+// Nothing here queries a database. The pipeline precomputes every aggregate the
+// pages plot, because doing it in the browser meant shipping DuckDB's WebAssembly
+// build — tens of megabytes — to render a thirty-row bar chart. Two small files are
+// bundled as page assets, and the two sharded ones are fetched on demand, so a
+// reader pays only for the organism and score they are actually looking at.
+//
+//   overview.json          bundled; per-organism aggregates for every metric
+//   samples.json           bundled; sample metadata, column oriented
+//   shards/rankings/<s>.json   one score's rankings, for every grouping variable
+//   shards/organisms/<n>.json  one organism's per-sample values, all metrics
 
-// Columns the pages never offer as a variable: the join key, and anything the merge
-// step classified as an identifier or as having a single value.
+// Written next to the pages by the workflow rather than bundled, because Observable
+// Framework only copies files a page names literally, and these are chosen at
+// runtime. A relative URL resolves against the page, which is a sibling of the
+// directory, wherever the site is hosted.
+const SHARDS = "./shards";
+
+const cache = new Map();
+
+async function loadJSON(url) {
+  if (!cache.has(url)) {
+    cache.set(url, fetch(url).then((response) => {
+      if (!response.ok) {
+        throw new Error(`${url} returned ${response.status}`);
+      }
+      return response.json();
+    }));
+  }
+  return cache.get(url);
+}
+
+/** One organism's per-sample scores: {organism, sample: [...], <metric>: [...]}. */
+export async function loadOrganism(meta, organism) {
+  const index = meta.organisms.indexOf(organism);
+  if (index < 0) throw new Error(`${organism} is not in this cohort`);
+  return loadJSON(`${SHARDS}/organisms/${index}.json`);
+}
+
+/** One score's rankings, keyed by grouping variable. */
+export async function loadRanking(score) {
+  return loadJSON(`${SHARDS}/rankings/${score}.json`);
+}
+
+/** Column-oriented JSON to an array of row objects. */
+export function toRows(columns) {
+  const names = Object.keys(columns);
+  const n = names.length ? columns[names[0]].length : 0;
+  return Array.from({ length: n }, (_, i) => {
+    const row = {};
+    for (const name of names) row[name] = columns[name][i];
+    return row;
+  });
+}
+
+/** Join one organism's values to the sample metadata, dropping unmatched samples. */
+export function withMetadata(shard, samples, metric) {
+  const bySample = new Map(samples.map((s) => [s.sample, s]));
+  return shard.sample
+    .map((sample, i) => {
+      const row = bySample.get(sample);
+      return row ? { ...row, value: shard[metric][i] } : null;
+    })
+    .filter((d) => d !== null && d.value != null);
+}
+
+// Columns the pages never offer as a variable: identifiers and single-valued ones.
 const UNUSABLE_KINDS = new Set(["identifier", "constant"]);
 
 /** Metadata columns that can group samples into comparable sets. */
@@ -18,19 +78,17 @@ export function groupingColumns(meta) {
 /**
  * The grouping variable to show first.
  *
- * Alphabetical order is a bad default: it happened to select a treatment column that
- * is missing for most of the cohort, which silently dropped more than half the samples
- * from the first plot a reader sees. Prefer a complete variable with at least two
- * levels, and among those the one with the fewest levels, since a two-arm comparison
- * is the easiest thing to read first.
+ * Alphabetical order is a bad default: it selected a treatment column missing for
+ * most of the cohort, which silently dropped half the samples from the first plot a
+ * reader sees. Prefer a complete variable with at least two levels, and among those
+ * the one with the fewest, since a two-arm comparison reads most easily first.
  */
 export function defaultGroupingColumn(meta) {
   const candidates = groupingColumns(meta).filter((c) => c.n_unique > 1);
   if (candidates.length === 0) return undefined;
-  const ranked = [...candidates].sort(
+  return [...candidates].sort(
     (a, b) => a.n_missing - b.n_missing || a.n_unique - b.n_unique
-  );
-  return ranked[0].name;
+  )[0].name;
 }
 
 /** Look up one column's description. */
@@ -39,28 +97,11 @@ export function column(meta, name) {
 }
 
 /**
- * SQL selecting a metadata column as a plottable time value.
- *
- * Dates are stored as strings, because the metadata is read from CSV without date
- * parsing. Selecting one directly hands JavaScript a string that Date arithmetic turns
- * into NaN, which crashes the page. Converting to epoch milliseconds in SQL gives a
- * number that works both as a linear value and as a Date.
- */
-export function timeExpression(meta, name) {
-  const info = column(meta, name);
-  return info?.is_temporal
-    ? `epoch_ms(CAST(${sqlIdent(name)} AS TIMESTAMP))`
-    : sqlIdent(name);
-}
-
-/**
  * Metadata columns usable as an x-axis for a trajectory.
  *
  * A column only qualifies if it changes between a participant's own samples. Age at
  * transplant and treatment start day are numeric and read like times, but are
- * recorded once per participant, so a trajectory against them is meaningless. The
- * merge step records this as varies_within_participant; when no participant column
- * was supplied the flag is absent and every numeric column is offered.
+ * recorded once per participant, so a trajectory against them is meaningless.
  */
 export function timeColumns(meta) {
   return meta.columns
@@ -85,7 +126,7 @@ export function defaultTimeColumn(meta) {
 
 /**
  * The organism to show first. Prefers a human pathogen over its animal namesakes:
- * the VirScan library contains bovine and murine counterparts that sort ahead
+ * the library contains bovine and murine counterparts that sort ahead
  * alphabetically and are almost never what someone wants to see first.
  */
 export function defaultOrganism(organisms, preferred = /human respiratory syncytial/i) {
@@ -121,74 +162,4 @@ export function scoreColumns(meta) {
   return [...meta.score_columns].sort(
     (a, b) => preferred.indexOf(a) - preferred.indexOf(b)
   );
-}
-
-/** SQL string literal, escaping embedded quotes. Organism names contain apostrophes. */
-export function sqlLiteral(value) {
-  return `'${String(value).replaceAll("'", "''")}'`;
-}
-
-/** SQL identifier, for metadata column names chosen at runtime. */
-export function sqlIdent(name) {
-  return `"${String(name).replaceAll('"', '""')}"`;
-}
-
-/**
- * Organisms ranked by how much a score separates the levels of a grouping column:
- * the spread between the highest and lowest group mean, in units of the pooled
- * standard deviation. A crude effect size, meant for ranking a list of candidates
- * to look at, not for inference.
- */
-export function rankingQuery({ score, groupBy, minPerGroup = 3 }) {
-  const g = sqlIdent(groupBy);
-  const s = sqlIdent(score);
-  return `
-    WITH joined AS (
-      SELECT o.organism, m.${g} AS grp, o.${s} AS value, o.n_hits_all
-      FROM scores o
-      JOIN samples m USING (sample)
-      WHERE m.${g} IS NOT NULL AND o.${s} IS NOT NULL
-    ),
-    per_group AS (
-      SELECT organism, grp, avg(value) AS mu, count(*) AS n, stddev_samp(value) AS sd
-      FROM joined GROUP BY organism, grp
-      HAVING count(*) >= ${minPerGroup}
-    ),
-    spread AS (
-      SELECT organism,
-             max(mu) - min(mu) AS delta,
-             sqrt(avg(coalesce(sd, 0) * coalesce(sd, 0))) AS pooled_sd,
-             count(*) AS n_groups,
-             sum(n) AS n_samples
-      FROM per_group GROUP BY organism
-    ),
-    prevalence AS (
-      SELECT organism,
-             sum(CASE WHEN n_hits_all > 0 THEN 1 ELSE 0 END) AS n_responders,
-             sum(CASE WHEN n_hits_all > 0 THEN 1 ELSE 0 END)::DOUBLE / count(*) AS hit_rate
-      FROM joined GROUP BY organism
-    )
-    SELECT s.organism, s.delta, s.pooled_sd, s.n_groups, s.n_samples,
-           p.n_responders, p.hit_rate,
-           CASE WHEN s.pooled_sd > 0 THEN s.delta / s.pooled_sd ELSE NULL END AS effect
-    FROM spread s JOIN prevalence p USING (organism)
-    WHERE s.n_groups > 1
-    ORDER BY effect DESC NULLS LAST
-  `;
-}
-
-/** Per-sample scores for one organism, joined to the sample metadata. */
-export function organismQuery({ organism, score, columns }) {
-  const selected = columns.map((c) => `m.${sqlIdent(c)}`).join(", ");
-  return `
-    SELECT m.sample, o.${sqlIdent(score)} AS value${selected ? ", " + selected : ""}
-    FROM scores o
-    JOIN samples m USING (sample)
-    WHERE o.organism = ${sqlLiteral(organism)}
-  `;
-}
-
-/** Arrow result to plain objects, which Observable Plot handles more predictably. */
-export function rows(result) {
-  return Array.from(result, (d) => ({ ...d }));
 }

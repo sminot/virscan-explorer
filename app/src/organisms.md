@@ -5,21 +5,19 @@ title: Organisms
 # Comparing organisms across groups
 
 ```js
-const meta = await FileAttachment("data/cohort.json").json();
-const db = await DuckDBClient.of({
-  scores: FileAttachment("data/organism_scores.parquet"),
-  samples: FileAttachment("data/samples.parquet")
-});
+const meta = await FileAttachment("data/overview.json").json();
+const sampleColumns = await FileAttachment("data/samples.json").json();
 ```
 
 ```js
 import {
-  rows, groupingColumns, defaultGroupingColumn, column, scoreColumns, scoreLabel,
-  rankingQuery, organismQuery, sqlIdent
+  toRows, withMetadata, loadRanking, loadOrganism,
+  groupingColumns, defaultGroupingColumn, column, scoreColumns, scoreLabel
 } from "./components/cohort.js";
 ```
 
 ```js
+const samples = toRows(sampleColumns);
 const groups = groupingColumns(meta);
 const score = view(Inputs.select(scoreColumns(meta), {
   label: "Score", format: scoreLabel, value: "gmean_ebs_hits"
@@ -43,7 +41,19 @@ the group means are, scaled by the pooled standard deviation within groups. Sele
 row to see the distribution underneath.
 
 ```js
-const ranked = rows(await db.query(rankingQuery({score, groupBy})));
+// One fetch per score metric, covering every grouping variable, then cached.
+const rankingsForScore = await loadRanking(score);
+const ranked = (() => {
+  const r = rankingsForScore[groupBy];
+  if (!r) return [];
+  return r.organism.map((organism, i) => ({
+    organism,
+    effect: r.effect[i],
+    delta: r.delta[i],
+    hit_rate: r.hit_rate[i],
+    n_samples: r.n_samples[i]
+  })).sort((a, b) => (b.effect ?? -Infinity) - (a.effect ?? -Infinity));
+})();
 ```
 
 ```js
@@ -51,8 +61,8 @@ const ranked = rows(await db.query(rankingQuery({score, groupBy})));
 // responds to, where two or three responders produce a large standardised difference.
 // The floor is a visible control, not a hidden filter, because a rare but real
 // response is exactly the kind of thing someone may be looking for.
-// Expressed in percent rather than as a fraction: the paired number box is a real
-// number input, and a percent-formatted string cannot be shown in one.
+// Expressed in percent: the paired number box is a real number input, and a
+// percent-formatted string cannot be shown in one.
 const minHitPercent = view(Inputs.range([0, 50], {
   label: "Minimum hit rate (%)", step: 1, value: 10
 }));
@@ -74,35 +84,26 @@ organisms${minHitPercent > 0 ? html` detected in at least ${minHitPercent}% of s
 ```
 
 ```js
-const picked = view(Inputs.table(
-  shortlist.map(d => ({
-    organism: d.organism,
-    effect: d.effect,
-    difference: d.delta,
-    hit_rate: d.hit_rate,
-    samples: Number(d.n_samples)
-  })),
-  {
-    columns: ["organism", "effect", "difference", "hit_rate", "samples"],
-    header: {
-      effect: "Effect size",
-      difference: `Δ ${scoreLabel(score)}`,
-      hit_rate: "Hit rate",
-      samples: "Samples"
-    },
-    format: {
-      effect: d => d == null ? "" : d.toFixed(2),
-      difference: d => d == null ? "" : d.toFixed(3),
-      hit_rate: d => d == null ? "" : `${(100 * d).toFixed(0)}%`
-    },
-    // Organism names run long and are the point of the table; give them room rather
-    // than truncating to an unreadable "Human parainfluenz...".
-    width: {organism: 380},
-    required: false,
-    multiple: false,
-    height: 320
-  }
-));
+const picked = view(Inputs.table(shortlist, {
+  columns: ["organism", "effect", "delta", "hit_rate", "n_samples"],
+  header: {
+    effect: "Effect size",
+    delta: `Δ ${scoreLabel(score)}`,
+    hit_rate: "Hit rate",
+    n_samples: "Samples"
+  },
+  format: {
+    effect: d => d == null ? "" : d.toFixed(2),
+    delta: d => d == null ? "" : d.toFixed(3),
+    hit_rate: d => d == null ? "" : `${(100 * d).toFixed(0)}%`
+  },
+  // Organism names run long and are the point of the table; give them room rather
+  // than truncating to an unreadable "Human parainfluenz...".
+  width: {organism: 380},
+  required: false,
+  multiple: false,
+  height: 320
+}));
 ```
 
 ```js
@@ -111,8 +112,9 @@ const organism = picked?.organism ?? shortlist[0]?.organism;
 ```
 
 ```js
+// One fetch per organism, about 30 KB, then cached.
 const detail = organism
-  ? rows(await db.query(organismQuery({organism, score, columns: [groupBy]})))
+  ? withMetadata(await loadOrganism(meta, organism), samples, score)
       .map(d => ({...d, group: d[groupBy]}))
       .filter(d => d.group != null)
   : [];
@@ -128,12 +130,9 @@ const groupLevels = [...new Set(detail.map(d => d.group))].sort();
 const responders = detail.filter(d => d.value > 0);
 const prevalence = groupLevels.map(group => {
   const inGroup = detail.filter(d => d.group === group);
-  return {
-    group,
-    n: inGroup.length,
-    responders: inGroup.filter(d => d.value > 0).length,
-    fraction: inGroup.length ? inGroup.filter(d => d.value > 0).length / inGroup.length : 0
-  };
+  const n = inGroup.length;
+  const hits = inGroup.filter(d => d.value > 0).length;
+  return {group, n, responders: hits, fraction: n ? hits / n : 0};
 });
 ```
 
@@ -147,12 +146,7 @@ Plot.plot({
   marginLeft: 120,
   marginRight: 70,
   height: Math.max(120, 46 * groupLevels.length + 60),
-  x: {
-    label: "Samples with at least one hit",
-    grid: true,
-    domain: [0, 1],
-    tickFormat: "%"
-  },
+  x: {label: "Samples with at least one hit", grid: true, domain: [0, 1], tickFormat: "%"},
   y: {label: null, domain: groupLevels},
   color: {legend: false},
   marks: [
@@ -195,17 +189,17 @@ response given that there was one. Read it together with the prevalence above: a
 can look stronger here simply because fewer of its members responded at all.
 
 ```js
-const summary = rows(await db.query(`
-  SELECT m.${sqlIdent(groupBy)} AS "Group",
-         count(*) AS "n",
-         avg(o.${sqlIdent(score)}) AS "Mean",
-         median(o.${sqlIdent(score)}) AS "Median",
-         sum(CASE WHEN o.n_hits_all > 0 THEN 1 ELSE 0 END)::DOUBLE / count(*) AS "Hit rate"
-  FROM scores o JOIN samples m USING (sample)
-  WHERE o.organism = '${String(organism ?? "").replaceAll("'", "''")}'
-    AND m.${sqlIdent(groupBy)} IS NOT NULL
-  GROUP BY 1 ORDER BY 1
-`)).map(d => ({...d, n: Number(d.n)}));
+const summary = groupLevels.map(group => {
+  const values = detail.filter(d => d.group === group).map(d => d.value).sort(d3.ascending);
+  const hits = values.filter(v => v > 0).length;
+  return {
+    Group: group,
+    n: values.length,
+    Mean: d3.mean(values),
+    Median: d3.median(values),
+    "Hit rate": values.length ? hits / values.length : 0
+  };
+});
 ```
 
 ```js

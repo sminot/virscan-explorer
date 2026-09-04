@@ -87,7 +87,9 @@ Python dependencies at run time from the inline script metadata in
 
 ```
 index.html, organisms.html, longitudinal.html, cohort.html
-_observablehq/, _npm/, _file/, _import/, _duckdb/    the site's own assets
+_observablehq/, _npm/, _file/, _import/              the site's own assets
+shards/organisms/<n>.json                            one organism's per-sample values
+shards/rankings/<score>.json                         one score's rankings, per grouping variable
 tables/organism_scores.parquet                       merged scores, one row per sample x organism
 tables/samples.parquet                               metadata joined to sequencing QC
 tables/organisms.parquet                             organism list plus any annotations
@@ -99,8 +101,9 @@ tables/merge_report.json                             what was merged, and what w
 files under a `data/` prefix, so it lands at `data/index.html`, which is where the
 portal's Web Viewer looks. Open it from the dataset's **Visualize → Web Viewer** menu.
 
-An output dataset is around 100 MB, most of which is the DuckDB WebAssembly runtime
-bundled into the site so that it needs no external network access.
+An output dataset is around 27 MB. A page loads between 0.7 MB and 1.1 MB of that,
+because every aggregate the pages draw is precomputed at build time and the per-organism
+and per-score files are fetched only when someone selects one.
 
 `metadata_snapshot.csv` exists so that an analysis records the metadata it was run
 against. Metadata gets corrected over time; without the snapshot there is no way to
@@ -150,12 +153,16 @@ npm run dev        # http://127.0.0.1:3000
 
 The app reads `app/src/data/`, which the workflow fills at build time and which is
 never committed. To work on the pages, run the merge step once and copy its output
-there:
+there. The sharded files are fetched by relative URL rather than bundled, so they go
+next to the built pages instead:
 
 ```bash
 uv run bin/merge_virscan.py --manifest manifest.csv --metadata cohort.csv \
   --participant-column pt_id --outdir /tmp/merged
-cp /tmp/merged/*.parquet /tmp/merged/*.json app/src/data/
+cp /tmp/merged/site/overview.json /tmp/merged/site/samples.json \
+   /tmp/merged/merge_report.json app/src/data/
+cd app && npx observable build
+mkdir -p dist/shards && cp -R /tmp/merged/site/organisms /tmp/merged/site/rankings dist/shards/
 ```
 
 To check a built site renders rather than merely loading:
@@ -167,6 +174,29 @@ node test/inspect_site.mjs http://127.0.0.1:8137 /tmp/shots
 
 It opens every page, waits for the charts, and fails on a console error, a failed
 request, or a page that produced no plot.
+
+## Why the data is precomputed
+
+Every view the pages draw is an aggregate over the score matrix or a single organism's
+slice of it, and both are known at build time. The first version queried the matrix in
+the browser with DuckDB-WASM, which meant a reader downloaded roughly 45 MB — most of it
+the database engine — to render a thirty-row bar chart. The merge step now writes:
+
+| File | Size | Fetched |
+|---|---|---|
+| `overview.json` | 72 KB | bundled; the whole landing page |
+| `samples.json` | 83 KB | bundled; sample metadata |
+| `shards/rankings/<score>.json` | ~280 KB | when a score is chosen |
+| `shards/organisms/<n>.json` | ~29 KB | when an organism is chosen |
+
+The two sharded sets exist because a reader looks at one score and one organism at a
+time; loading every combination up front would recreate the original problem in a
+different form. They are fetched by relative URL rather than bundled as page assets,
+because Observable Framework only includes files a page names literally and which one is
+wanted is not known until someone picks it.
+
+There is no query engine in the browser and no Parquet reader. The Parquet tables under
+`tables/` are for download and reuse, not for the site.
 
 ## Constraints worth knowing
 

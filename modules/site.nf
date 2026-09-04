@@ -37,11 +37,12 @@ process BUILD_SITE {
            app_source/observablehq.config.js app_source/src app/
     rm -rf app/src/data app/src/.observablehq
 
+    # Only the small precomputed files are bundled as page assets. The score matrix
+    # is not: querying it in the browser is what made the pages download tens of
+    # megabytes, and every view the pages draw is precomputed instead.
     mkdir -p app/src/data
-    cp ${merged}/organism_scores.parquet \\
-       ${merged}/samples.parquet \\
-       ${merged}/organisms.parquet \\
-       ${merged}/cohort.json \\
+    cp ${merged}/site/overview.json \\
+       ${merged}/site/samples.json \\
        ${merged}/merge_report.json \\
        app/src/data/
 
@@ -53,6 +54,13 @@ process BUILD_SITE {
     cd ..
 
     mv app/dist ./dist
+
+    # The per-organism and per-score files are fetched at runtime by relative URL, so
+    # they are copied in beside the pages rather than bundled. Observable Framework
+    # only includes files a page names literally, and which of these is wanted is not
+    # known until someone picks an organism.
+    mkdir -p dist/shards
+    cp -R ${merged}/site/organisms ${merged}/site/rankings dist/shards/
 
     # The site must not depend on any remote origin: Cirro serves it inside an iframe
     # whose content security policy is not documented.

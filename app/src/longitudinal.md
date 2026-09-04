@@ -5,26 +5,20 @@ title: Longitudinal
 # Trajectories over time
 
 ```js
-const meta = await FileAttachment("data/cohort.json").json();
-const db = await DuckDBClient.of({
-  scores: FileAttachment("data/organism_scores.parquet"),
-  samples: FileAttachment("data/samples.parquet")
-});
+const meta = await FileAttachment("data/overview.json").json();
+const sampleColumns = await FileAttachment("data/samples.json").json();
 ```
 
 ```js
 import {
-  rows, groupingColumns, defaultGroupingColumn, timeColumns, defaultTimeColumn,
-  defaultOrganism, column, timeExpression, scoreColumns, scoreLabel,
-  sqlIdent, sqlLiteral
+  toRows, withMetadata, loadOrganism, groupingColumns, defaultGroupingColumn,
+  timeColumns, defaultTimeColumn, defaultOrganism, column, scoreColumns, scoreLabel
 } from "./components/cohort.js";
 ```
 
 ```js
+const samples = toRows(sampleColumns);
 const participantColumn = meta.participant_column;
-const allOrganisms = rows(await db.query(
-  `SELECT DISTINCT organism FROM scores ORDER BY organism`
-)).map(d => d.organism);
 const times = timeColumns(meta);
 const groups = groupingColumns(meta);
 ```
@@ -40,8 +34,8 @@ const organismFilter = view(Inputs.text({
 ```js
 const needle = organismFilter.trim().toLowerCase();
 const matchingOrganisms = needle
-  ? allOrganisms.filter(o => o.toLowerCase().includes(needle))
-  : allOrganisms;
+  ? meta.organisms.filter(o => o.toLowerCase().includes(needle))
+  : meta.organisms;
 ```
 
 ```js
@@ -74,21 +68,17 @@ const isTemporal = column(meta, timeBy)?.is_temporal ?? false;
 ```
 
 ```js
-// The time value is converted to epoch milliseconds in SQL for a date column. Dates
-// come out of the metadata CSV as strings, and doing the arithmetic in JavaScript
-// turns them into NaN, which breaks the page rather than degrading it.
-const trajectory = rows(await db.query(`
-  SELECT m.sample,
-         ${participantColumn ? `m.${sqlIdent(participantColumn)} AS participant,` : ""}
-         ${timeExpression(meta, timeBy)} AS t,
-         m.${sqlIdent(groupBy)} AS grp,
-         o.${sqlIdent(score)} AS value
-  FROM scores o JOIN samples m USING (sample)
-  WHERE o.organism = ${sqlLiteral(organism)}
-    AND m.${sqlIdent(timeBy)} IS NOT NULL
-    AND m.${sqlIdent(groupBy)} IS NOT NULL
-`)).map(d => ({...d, t: Number(d.t)}))
-   .filter(d => Number.isFinite(d.t));
+// Dates arrive as ISO strings; Date.parse gives a number both the scale and the bin
+// labels can use. Anything unparseable is dropped rather than plotted as NaN.
+const trajectory = withMetadata(await loadOrganism(meta, organism), samples, score)
+  .map(d => ({
+    sample: d.sample,
+    participant: participantColumn ? d[participantColumn] : null,
+    t: isTemporal ? Date.parse(d[timeBy]) : Number(d[timeBy]),
+    grp: d[groupBy],
+    value: d.value
+  }))
+  .filter(d => Number.isFinite(d.t) && d.grp != null);
 ```
 
 ```js

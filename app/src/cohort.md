@@ -5,14 +5,14 @@ title: Cohort
 # The cohort and its metadata
 
 ```js
-const meta = await FileAttachment("data/cohort.json").json();
+const meta = await FileAttachment("data/overview.json").json();
 const report = await FileAttachment("data/merge_report.json").json();
-const db = await DuckDBClient.of({samples: FileAttachment("data/samples.parquet")});
+const sampleColumns = await FileAttachment("data/samples.json").json();
 ```
 
 ```js
-import {rows} from "./components/cohort.js";
-const samples = rows(await db.query(`SELECT * FROM samples`));
+import {toRows} from "./components/cohort.js";
+const samples = toRows(sampleColumns);
 ```
 
 Every variable the pipeline found in the metadata table, how it was classified, and how
@@ -32,11 +32,7 @@ const columnTable = meta.columns.map(c => ({
 ```
 
 ```js
-Inputs.table(columnTable, {
-  width: 1000,
-  height: 460,
-  layout: "auto"
-})
+Inputs.table(columnTable, {width: 1000, height: 460, layout: "auto"})
 ```
 
 ## Sequencing quality

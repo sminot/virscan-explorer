@@ -192,6 +192,109 @@ def describe_columns(samples, reserved, participant_column=None):
     return described
 
 
+def _column(series, digits=4):
+    """A JSON-safe list, with NaN as null and floats rounded to keep files small."""
+    if pd.api.types.is_float_dtype(series):
+        series = series.round(digits)
+    return [None if pd.isna(v) else (v.item() if hasattr(v, "item") else v)
+            for v in series]
+
+
+def _write_json(path, payload):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Separators without spaces: these files are fetched by a browser, not read.
+    path.write_text(json.dumps(payload, separators=(",", ":")))
+    return path.stat().st_size
+
+
+def write_site_data(outdir, scores, samples, organisms, site_metadata, groupings):
+    """Precompute everything the pages plot, so the browser downloads no engine.
+
+    Querying the 237k-row score matrix in the browser meant shipping DuckDB's
+    WebAssembly build, tens of megabytes, to render a thirty-row bar chart. Every
+    view is an aggregate or a single organism's slice, both of which are known at
+    build time, so they are computed here and served as small JSON instead.
+
+    Four shapes are written:
+      overview.json          per-organism aggregates for every metric; the whole
+                             landing page, and the organism list every page needs
+      samples.json           sample metadata, column oriented
+      rankings/<score>.json  organisms ranked by group separation, per grouping
+                             variable, for one score metric
+      organisms/<n>.json     one organism's per-sample values, all metrics
+
+    The last two are fetched on demand: a reader looks at one score and one
+    organism at a time, so loading every combination up front would recreate the
+    problem in a different form.
+    """
+    site = outdir / "site"
+    metrics = site_metadata["score_columns"]
+    ordered = sorted(scores["organism"].unique())
+    position = {name: i for i, name in enumerate(ordered)}
+
+    by_organism = scores.groupby("organism", sort=True)
+    overview = {
+        **site_metadata,
+        "organisms": ordered,
+        "means": {m: _column(by_organism[m].mean()) for m in metrics},
+        "medians": {m: _column(by_organism[m].median()) for m in metrics},
+        "hit_rate": _column(by_organism["n_hits_all"].apply(lambda s: (s > 0).mean())),
+        "organism_annotations": {
+            column: _column(organisms[column])
+            for column in organisms.columns if column != "organism"
+        },
+    }
+    written = {"overview.json": _write_json(site / "overview.json", overview)}
+
+    written["samples.json"] = _write_json(
+        site / "samples.json",
+        {column: _column(samples[column]) for column in samples.columns})
+
+    # One organism at a time, so the reader pays only for what they look at.
+    shard_bytes = 0
+    for name, group in by_organism:
+        shard = {"organism": name, "sample": _column(group["sample"])}
+        shard.update({m: _column(group[m]) for m in metrics})
+        shard_bytes += _write_json(site / "organisms" / f"{position[name]}.json", shard)
+    written["organisms/*.json"] = shard_bytes
+
+    joined = scores.merge(samples.drop(columns=["source_run"], errors="ignore"),
+                          on="sample", how="inner")
+    ranking_bytes = 0
+    for metric in metrics:
+        per_metric = {}
+        for variable in groupings:
+            present = joined[joined[variable].notna()]
+            if present.empty:
+                continue
+            stats = present.groupby(["organism", variable])[metric].agg(
+                ["mean", "std", "count"])
+            summary = stats.groupby("organism").agg(
+                delta=("mean", lambda s: s.max() - s.min()),
+                pooled=("std", lambda s: float((s.fillna(0) ** 2).mean() ** 0.5)),
+                n_samples=("count", "sum"),
+                n_groups=("count", "size"))
+            # A single group cannot separate anything, and a zero spread within
+            # groups makes the standardised difference meaningless rather than huge.
+            summary = summary[summary["n_groups"] > 1]
+            # A zero within-group spread makes the standardised difference infinite
+            # rather than large, so it is reported as missing and sorts last.
+            effect = summary["delta"] / summary["pooled"].replace(0, float("nan"))
+            hits = present.groupby("organism")["n_hits_all"].apply(lambda s: (s > 0).mean())
+            per_metric[variable] = {
+                "organism": summary.index.tolist(),
+                "effect": _column(effect, 3),
+                "delta": _column(summary["delta"]),
+                "hit_rate": _column(hits.reindex(summary.index)),
+                "n_samples": _column(summary["n_samples"].astype(int)),
+                "n_groups": _column(summary["n_groups"].astype(int)),
+            }
+        ranking_bytes += _write_json(site / "rankings" / f"{metric}.json", per_metric)
+    written["rankings/*.json"] = ranking_bytes
+
+    return written
+
+
 def main():
     args = parse_args()
     args.outdir.mkdir(parents=True, exist_ok=True)
@@ -338,6 +441,10 @@ def main():
     organisms.to_parquet(args.outdir / "organisms.parquet", index=False)
     (args.outdir / "cohort.json").write_text(json.dumps(site_metadata, indent=2))
     (args.outdir / "merge_report.json").write_text(json.dumps(report, indent=2))
+
+    groupings = [c["name"] for c in columns if c["kind"] == "categorical"]
+    written = write_site_data(args.outdir, scores, samples, organisms,
+                              site_metadata, groupings)
     # Verbatim copy, so an analysis always records the metadata it was run against.
     (args.outdir / "metadata_snapshot.csv").write_bytes(args.metadata.read_bytes())
 
@@ -345,6 +452,8 @@ def main():
         f"{len(analysed)} samples x {scores['organism'].nunique()} organisms "
         f"from {len(run_reports)} run(s) -> {args.outdir}"
     )
+    for name, size in written.items():
+        print(f"  site/{name:<22} {size / 1024:>8.0f} KB")
     if report["samples"]["measured_without_metadata"]:
         print(
             f"  {len(report['samples']['measured_without_metadata'])} measured samples "
