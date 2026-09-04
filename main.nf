@@ -82,12 +82,16 @@ workflow {
     // Cirro's dataPath already ends in /data, while a downloaded copy is the dataset
     // root with data/ inside it. Rather than require one shape, look for the file
     // under both and report both when neither is there.
+    // Paths are composed with Path.resolve, never by string interpolation. An S3 path
+    // renders without its scheme, so "${dir}/${relative}" yields /bucket/key, which
+    // file() then reads as a local absolute path that does not exist. resolve keeps
+    // the path on its own filesystem.
     def resolve = { dir, String relative ->
-        def candidates = ["${dir}/${relative}", "${dir}/data/${relative}"]
-        def found = candidates.collect { file(it) }.find { it.exists() }
+        def candidates = [dir.resolve(relative), dir.resolve("data/${relative}")]
+        def found = candidates.find { it.exists() }
         if (!found) {
-            error "No ${relative} under ${dir}. Looked in:\n  " +
-                  candidates.join("\n  ") +
+            error "No ${relative} under ${dir.toUriString()}. Looked in:\n  " +
+                  candidates.collect { it.toUriString() }.join("\n  ") +
                   "\nIs this a PhIP-Flow output dataset?"
         }
         return found
