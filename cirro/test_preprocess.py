@@ -2,7 +2,8 @@
 
 import unittest
 
-from preprocess import incompatible_inputs, input_specs, library_signature
+from preprocess import (incompatible_inputs, input_specs, library_signature,
+                        referenced_paths)
 
 
 class LibrarySignature(unittest.TestCase):
@@ -97,6 +98,40 @@ class InputSpecs(unittest.TestCase):
                    for i in range(3)]
         self.assertEqual([name for name, _ in input_specs(entries)],
                          ["run0", "run1", "run2"])
+
+
+class ParameterSourcedDatasets(unittest.TestCase):
+    """Cirro reports the dataset a file parameter reads from as an input too.
+
+    The metadata CSV lives in its own dataset, so without this it arrives looking like
+    an extra VirScan run and gets merged as one.
+    """
+
+    RUNS = [
+        {"id": "a", "name": "VS76_Vir3_Dec2024_Z7", "dataPath": "s3://b/datasets/a/data"},
+        {"id": "b", "name": "VS77_Vir3_Dec2024_Z7", "dataPath": "s3://b/datasets/b/data"},
+    ]
+    METADATA = {"id": "m", "name": "cohort metadata",
+                "dataPath": "s3://b/datasets/m/data"}
+
+    def test_finds_paths_nested_in_form_groups(self):
+        params = {"metadata_options": {"metadata": "s3://b/datasets/m/data/cohort.csv",
+                                       "sample_id_column": "vs_id"}}
+        self.assertEqual(referenced_paths(params), {"s3://b/datasets/m/data/cohort.csv"})
+
+    def test_a_dataset_a_parameter_reads_from_is_not_a_run(self):
+        specs = input_specs(
+            self.RUNS + [self.METADATA],
+            {"metadata": "s3://b/datasets/m/data/cohort.csv"})
+        self.assertEqual([name for name, _ in specs],
+                         ["VS76_Vir3_Dec2024_Z7", "VS77_Vir3_Dec2024_Z7"])
+
+    def test_without_parameters_every_input_is_a_run(self):
+        self.assertEqual(len(input_specs(self.RUNS)), 2)
+
+    def test_a_run_is_not_dropped_by_an_unrelated_parameter(self):
+        specs = input_specs(self.RUNS, {"metadata": "s3://other/elsewhere/cohort.csv"})
+        self.assertEqual(len(specs), 2)
 
 
 if __name__ == "__main__":

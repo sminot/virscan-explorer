@@ -4,10 +4,15 @@ The run form lets a person pick several PhIP-Flow output datasets, because a coh
 usually sequenced across more than one VirScan run. The parameter map can only address
 inputs positionally, so the list is assembled here instead and passed as one parameter.
 
-Two parameters are set. `inputs` is the S3 path of each dataset. `input_names` is the
-label each run is shown under in the published site: a dataset's S3 path ends in its
-UUID, so deriving a label from the path would fill the site with UUIDs instead of
-names like VS76_Vir3_Dec2024_Z7.
+Two parameters are set. `inputs` is the data path of each dataset. `input_names` is the
+label each run is shown under in the published site: a dataset's path ends in its UUID,
+so deriving a label from the path would fill the site with UUIDs instead of names like
+VS76_Vir3_Dec2024_Z7.
+
+Cirro reports every dataset the run touches in metadata["inputs"], including the one a
+file parameter points into. The metadata CSV lives in its own dataset, so it arrives
+looking exactly like a fourth VirScan run and would be merged as one. Datasets that a
+parameter refers to are therefore dropped before the list is built.
 
 Also refuses a set of inputs that cannot legitimately be merged. VirScan datasets are
 named <run>_<library>_<libraryVersion>_Z<threshold>, e.g. VS78_Vir3_Dec2024_Z7. Scores
@@ -62,13 +67,28 @@ def incompatible_inputs(names):
     )
 
 
-def input_specs(metadata_inputs):
-    """(name, path) for each input dataset, from ds.metadata['inputs'].
+def referenced_paths(params):
+    """Every storage path a parameter points at, at any depth of the form's groups."""
+    found = set()
+    if isinstance(params, dict):
+        for value in params.values():
+            found |= referenced_paths(value)
+    elif isinstance(params, (list, tuple)):
+        for value in params:
+            found |= referenced_paths(value)
+    elif isinstance(params, str) and params.startswith("s3://"):
+        found.add(params)
+    return found
 
-    Cirro records each input's id, processId and dataPath. A name is used when present
-    and a readable one is otherwise reconstructed, falling back to the id so a run is
-    never blocked by a missing label.
+
+def input_specs(metadata_inputs, params=None):
+    """(name, path) for each VirScan run among the run's input datasets.
+
+    Cirro records each input's id, processId and dataPath. A dataset that a file
+    parameter reads from is reported as an input too, and is excluded here: it is the
+    parameter's source, not a run to merge.
     """
+    excluded = referenced_paths(params or {})
     specs = []
     for entry in metadata_inputs:
         path = entry.get("dataPath") or entry.get("s3")
@@ -77,8 +97,11 @@ def input_specs(metadata_inputs):
                 f"Input dataset {entry.get('id')!r} has no dataPath; "
                 "cannot tell the workflow where to read it."
             )
+        path = str(path).rstrip("/")
+        if any(reference.startswith(path) for reference in excluded):
+            continue
         name = entry.get("name") or entry.get("datasetName") or entry.get("id")
-        specs.append((str(name), str(path).rstrip("/")))
+        specs.append((str(name), path))
     return specs
 
 
@@ -91,7 +114,13 @@ def main():
     if not metadata_inputs:
         raise ValueError("No input datasets were selected. Pick at least one VirScan run.")
 
-    specs = input_specs(metadata_inputs)
+    specs = input_specs(metadata_inputs, ds.params)
+    if not specs:
+        raise ValueError(
+            "Every selected dataset is referenced by a parameter, so there are no "
+            "VirScan runs to merge. Select the PhIP-Flow output datasets as the run's "
+            "inputs, and point the metadata parameter at the table separately."
+        )
 
     problem = incompatible_inputs([name for name, _path in specs])
     if problem:

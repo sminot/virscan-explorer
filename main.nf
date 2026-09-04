@@ -78,15 +78,24 @@ workflow {
               "${input_dirs.size()} dataset(s); they are matched by position."
     }
 
+    // A PhIP-Flow dataset is addressed two ways depending on where it came from.
+    // Cirro's dataPath already ends in /data, while a downloaded copy is the dataset
+    // root with data/ inside it. Rather than require one shape, look for the file
+    // under both and report both when neither is there.
+    def resolve = { dir, String relative ->
+        def candidates = ["${dir}/${relative}", "${dir}/data/${relative}"]
+        def found = candidates.collect { file(it) }.find { it.exists() }
+        if (!found) {
+            error "No ${relative} under ${dir}. Looked in:\n  " +
+                  candidates.join("\n  ") +
+                  "\nIs this a PhIP-Flow output dataset?"
+        }
+        return found
+    }
+
     def runs = input_dirs.withIndex().collect { dir, i ->
-        def summary = file("${dir}/data/aggregated_data/organism.summary.csv.gz")
-        def annotation = file("${dir}/data/wide_data/virscan_sample_annotation_table.csv.gz")
-        if (!summary.exists()) {
-            error "${dir} has no data/aggregated_data/organism.summary.csv.gz. Is it a PhIP-Flow output directory?"
-        }
-        if (!annotation.exists()) {
-            error "${dir} has no data/wide_data/virscan_sample_annotation_table.csv.gz. Is it a PhIP-Flow output directory?"
-        }
+        def summary = resolve(dir, "aggregated_data/organism.summary.csv.gz")
+        def annotation = resolve(dir, "wide_data/virscan_sample_annotation_table.csv.gz")
         [input_names ? input_names[i] : dir.name, summary, annotation]
     }
 
