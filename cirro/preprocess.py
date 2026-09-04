@@ -1,8 +1,13 @@
-"""Turn the run's selected PhIP-Flow datasets into the --inputs list main.nf expects.
+"""Turn the run's selected PhIP-Flow datasets into the inputs main.nf expects.
 
 The run form lets a person pick several PhIP-Flow output datasets, because a cohort is
 usually sequenced across more than one VirScan run. The parameter map can only address
 inputs positionally, so the list is assembled here instead and passed as one parameter.
+
+Two parameters are set. `inputs` is the S3 path of each dataset. `input_names` is the
+label each run is shown under in the published site: a dataset's S3 path ends in its
+UUID, so deriving a label from the path would fill the site with UUIDs instead of
+names like VS76_Vir3_Dec2024_Z7.
 
 Also refuses a set of inputs that cannot legitimately be merged. VirScan datasets are
 named <run>_<library>_<libraryVersion>_Z<threshold>, e.g. VS78_Vir3_Dec2024_Z7. Scores
@@ -57,23 +62,46 @@ def incompatible_inputs(names):
     )
 
 
+def input_specs(metadata_inputs):
+    """(name, path) for each input dataset, from ds.metadata['inputs'].
+
+    Cirro records each input's id, processId and dataPath. A name is used when present
+    and a readable one is otherwise reconstructed, falling back to the id so a run is
+    never blocked by a missing label.
+    """
+    specs = []
+    for entry in metadata_inputs:
+        path = entry.get("dataPath") or entry.get("s3")
+        if not path:
+            raise ValueError(
+                f"Input dataset {entry.get('id')!r} has no dataPath; "
+                "cannot tell the workflow where to read it."
+            )
+        name = entry.get("name") or entry.get("datasetName") or entry.get("id")
+        specs.append((str(name), str(path).rstrip("/")))
+    return specs
+
+
 def main():
     from cirro.helpers.preprocess_dataset import PreprocessDataset
 
     ds = PreprocessDataset.from_running()
 
-    datasets = list(ds.inputs)
-    if not datasets:
+    metadata_inputs = (ds.metadata or {}).get("inputs") or []
+    if not metadata_inputs:
         raise ValueError("No input datasets were selected. Pick at least one VirScan run.")
 
-    problem = incompatible_inputs([dataset.name for dataset in datasets])
+    specs = input_specs(metadata_inputs)
+
+    problem = incompatible_inputs([name for name, _path in specs])
     if problem:
         raise ValueError(problem)
 
-    ds.add_param("inputs", ",".join(dataset.s3 for dataset in datasets))
+    ds.add_param("inputs", ",".join(path for _name, path in specs))
+    ds.add_param("input_names", ",".join(name for name, _path in specs))
     ds.logger.info(
-        f"Merging {len(datasets)} VirScan run(s): "
-        f"{', '.join(sorted(d.name for d in datasets))}"
+        f"Merging {len(specs)} VirScan run(s): "
+        f"{', '.join(sorted(name for name, _path in specs))}"
     )
 
 

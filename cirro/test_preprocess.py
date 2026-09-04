@@ -2,7 +2,7 @@
 
 import unittest
 
-from preprocess import incompatible_inputs, library_signature
+from preprocess import incompatible_inputs, input_specs, library_signature
 
 
 class LibrarySignature(unittest.TestCase):
@@ -61,6 +61,42 @@ class IncompatibleInputs(unittest.TestCase):
         self.assertIsNone(
             incompatible_inputs(["VS76_Vir3_Dec2024_Z7", "my-reprocessed-run"])
         )
+
+
+class InputSpecs(unittest.TestCase):
+    """ds.metadata["inputs"] is what Cirro actually provides; there is no ds.inputs."""
+
+    def test_reads_name_and_path(self):
+        self.assertEqual(
+            input_specs([{"id": "abc", "processId": "p",
+                          "dataPath": "s3://bucket/datasets/abc",
+                          "name": "VS76_Vir3_Dec2024_Z7"}]),
+            [("VS76_Vir3_Dec2024_Z7", "s3://bucket/datasets/abc")],
+        )
+
+    def test_falls_back_to_the_id_when_unnamed(self):
+        # Better a UUID label than a failed run.
+        self.assertEqual(
+            input_specs([{"id": "abc", "dataPath": "s3://bucket/datasets/abc"}]),
+            [("abc", "s3://bucket/datasets/abc")],
+        )
+
+    def test_strips_a_trailing_slash_from_the_path(self):
+        # The workflow appends data/... to it, so a doubled slash would not resolve.
+        self.assertEqual(
+            input_specs([{"id": "a", "name": "n", "dataPath": "s3://b/d/a/"}])[0][1],
+            "s3://b/d/a",
+        )
+
+    def test_a_dataset_without_a_path_is_refused(self):
+        with self.assertRaises(ValueError):
+            input_specs([{"id": "abc", "name": "n"}])
+
+    def test_order_is_preserved_so_names_match_paths_by_position(self):
+        entries = [{"id": str(i), "name": f"run{i}", "dataPath": f"s3://b/{i}"}
+                   for i in range(3)]
+        self.assertEqual([name for name, _ in input_specs(entries)],
+                         ["run0", "run1", "run2"])
 
 
 if __name__ == "__main__":

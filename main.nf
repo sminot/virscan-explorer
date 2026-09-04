@@ -21,6 +21,9 @@ def helpMessage() {
       --outdir              Where to publish the site and merged tables.
 
     Optional:
+      --input_names         Comma-separated labels for the datasets in --inputs, matched
+                            by position. Defaults to each directory's name. Cirro sets
+                            this because a dataset path ends in its UUID.
       --sample_id_column    Metadata column holding the VirScan sample ID (default: vs_id)
       --participant_column  Metadata column identifying the participant. Required for
                             trajectory lines and repeated-measures views.
@@ -63,7 +66,19 @@ workflow {
         error "--inputs '${params.inputs}' matched no directories."
     }
 
-    def runs = input_dirs.collect { dir ->
+    // A run's label comes from --input_names when given, positionally. Cirro passes it
+    // because a dataset's path ends in its UUID, and labelling the published site with
+    // UUIDs instead of names like VS76_Vir3_Dec2024_Z7 would make it unreadable. Run
+    // locally, the directory name is already the label, so the parameter is optional.
+    def input_names = params.input_names
+        ? params.input_names.toString().split(',').collect { it.trim() }.findAll { it }
+        : []
+    if (input_names && input_names.size() != input_dirs.size()) {
+        error "--input_names has ${input_names.size()} name(s) but --inputs has " +
+              "${input_dirs.size()} dataset(s); they are matched by position."
+    }
+
+    def runs = input_dirs.withIndex().collect { dir, i ->
         def summary = file("${dir}/data/aggregated_data/organism.summary.csv.gz")
         def annotation = file("${dir}/data/wide_data/virscan_sample_annotation_table.csv.gz")
         if (!summary.exists()) {
@@ -72,7 +87,7 @@ workflow {
         if (!annotation.exists()) {
             error "${dir} has no data/wide_data/virscan_sample_annotation_table.csv.gz. Is it a PhIP-Flow output directory?"
         }
-        [dir.name, summary, annotation]
+        [input_names ? input_names[i] : dir.name, summary, annotation]
     }
 
     // One value channel carrying three parallel lists, so the staged file names line
